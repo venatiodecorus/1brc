@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type Measurements struct {
@@ -179,19 +180,25 @@ func readFile(file string) map[string][]float64 {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
-	ch := make(chan string)
+	ch := make(chan Line)
+	var wg sync.WaitGroup
+
 	go func() {
 		for scanner.Scan() {
-			ch <- scanner.Text()
+			wg.Add(1)
+			go processLine(scanner.Text(), &wg, ch)
 		}
+		wg.Wait()
 		close(ch)
 	}()
 
 	data := map[string][]float64{}
-	for text := range ch {
-		key, value := processLine(text)
-		data[key] = append(data[key], value)
-	}
+
+	go func() {
+		for d := range ch {
+			data[d.key] = append(data[d.key], d.value)
+		}
+	}()
 
 	if err := scanner.Err(); err != nil {
 		log.Fatal(err)
@@ -200,7 +207,13 @@ func readFile(file string) map[string][]float64 {
 	return data
 }
 
-func processLine(line string) (string, float64) {
+type Line struct {
+	key string
+	value float64
+}
+
+func processLine(line string, wg *sync.WaitGroup, ch chan<- Line) {
+	defer wg.Done()
 	parts := strings.Split(line, ";")
 	// Convert value to float
 	value,err := strconv.ParseFloat(parts[1], 64)
@@ -208,7 +221,11 @@ func processLine(line string) (string, float64) {
 		log.Fatal(err)
 	}
 
-	return parts[0], value
+	ch <- Line{
+		key: parts[0],
+		value: value,
+	}
+	// return parts[0], value
 
 	// min := data[parts[0]].min
 	// if value <= min || data[parts[0]].count == 0{
