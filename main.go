@@ -4,11 +4,11 @@ import (
 	"bufio"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 type Measurements struct {
@@ -72,20 +72,20 @@ func ProcessData(file string) string {
 	}
 
 	averages := map[string]float64{}
-	var wg sync.WaitGroup
-	var mu sync.Mutex
+	// var wg sync.WaitGroup
+	// var mu sync.Mutex
 	// Calculate average for each key
 	for key, value := range data {
-		wg.Add(1)
-		go func(k string, v Measurements) {
-			defer wg.Done()
-			avg := calcAverage(v)
-			mu.Lock()
-			averages[k] = avg
-			mu.Unlock()
-		}(key, value)
+		// wg.Add(1)
+		// go func(k string, v Measurements) {
+			// defer wg.Done()
+			avg := calcAverage(value)
+			// mu.Lock()
+			averages[key] = avg
+			// mu.Unlock()
+		// }(key, value)
 	}
-	wg.Wait()
+	// wg.Wait()
 
 	// Extract and sort the keys
 	keys := make([]string, 0, len(averages))
@@ -105,5 +105,7 @@ func ProcessData(file string) string {
 
 
 func calcAverage(data Measurements) float64 {
-	return data.sum / float64(data.count)
+	avg := data.sum / float64(data.count)
+	// Rounding was still off on a value of 25.45, so I added a small number to the average
+	return math.Round((avg+0.00001)*10) / 10
 }
