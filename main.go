@@ -6,6 +6,9 @@ import (
 	"log"
 	"math"
 	"os"
+	"runtime"
+	"runtime/pprof"
+	"runtime/trace"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +21,33 @@ type Measurements struct {
 }
 
 func main() {
+	e, err := os.Create("./profiles/" + "exec.pprof")
+	if err != nil {
+		log.Fatal("could not create trace execution profile: ", err)
+	}
+	defer e.Close()
+	trace.Start(e)
+	defer trace.Stop()
+
+	f,err := os.Create("./profiles" + "/cpu.pprof")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+	if err := pprof.StartCPUProfile(f); err != nil {
+		log.Fatal(err)
+	}
+	defer pprof.StopCPUProfile()
+
+	m, err := os.Create("./profiles/" + "mem.pprof")
+	if err != nil {
+		log.Fatal("could not create memory profile: ", err)
+	}
+	defer m.Close()
+	runtime.GC()
+	if err := pprof.WriteHeapProfile(m); err != nil {
+		log.Fatal("could not write memory profile: ", err)
+	}
 	// Open file
 	// file := "./data/test/samples/measurements-10.txt"
 	// file := "./data/test/samples/measurements-rounding.txt"
