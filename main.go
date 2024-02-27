@@ -16,9 +16,14 @@ import (
 )
 
 type Measurements struct {
-	avg float64
+	sum float64
+	count int
 	min float64
 	max float64
+}
+
+type Computed struct {
+	min,max,avg float64
 }
 
 func main() {
@@ -61,68 +66,10 @@ func main() {
 func ProcessData(file string) string {
 	data := readFile(file)
 
-	parsedData := map[string]Measurements{}
+	parsedData := map[string]Computed{}
 	for key, value := range data {
-		parsedData[key] = calcValues(value)
+		parsedData[key] = calcAverage(value)
 	}
-
-	// f, err := os.Open(file)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// defer f.Close()
-
-	// // Data structure to store the sum and count for each key
-	// data := map[string]Measurements{}
-
-	// // Read file line by line
-	// scanner := bufio.NewScanner(f)
-	// for scanner.Scan() {
-	// 	parts := strings.Split(scanner.Text(), ";")
-	// 	// Convert value to float
-	// 	value,err := strconv.ParseFloat(parts[1], 64)
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
-
-	// 	min := data[parts[0]].min
-	// 	if value <= min || data[parts[0]].count == 0{
-	// 		min = value
-	// 	}
-
-	// 	max := data[parts[0]].max
-	// 	if value > max || data[parts[0]].count == 0{
-	// 		max = value
-	// 	}
-
-	// 	// Increment sum and count for this key
-	// 	data[parts[0]] = Measurements{
-	// 		sum: data[parts[0]].sum + value,
-	// 		count: data[parts[0]].count + 1,
-	// 		min: min,
-	// 		max: max,
-	// 	}
-	// }
-
-	// if err := scanner.Err(); err != nil {
-	// 	log.Fatal(err)
-	// }
-
-	// averages := map[string]float64{}
-	// var wg sync.WaitGroup
-	// var mu sync.Mutex
-	// // Calculate average for each key
-	// for key, value := range data {
-	// 	wg.Add(1)
-	// 	go func(k string, v Measurements) {
-	// 		defer wg.Done()
-	// 		avg := calcAverage(v)
-	// 		mu.Lock()
-	// 		averages[k] = avg
-	// 		mu.Unlock()
-	// 	}(key, value)
-	// }
-	// wg.Wait()
 
 	// Extract and sort the keys
 	keys := make([]string, 0, len(parsedData))
@@ -140,39 +87,18 @@ func ProcessData(file string) string {
 	return "{" + output + "}"
 }
 
-
-// func calcAverage(data Measurements) float64 {
-// 	avg := data.sum / float64(data.count)
-// 	// Rounding was still off on a value of 25.45, so I added a small number to the average
-// 	return math.Round((avg+0.00001)*10) / 10
-// }
-
-func calcValues(city []float64) Measurements {
-	min := city[0]
-	max := city[0]
-	sum := 0.0
-	count := 0
-	for _, value := range city {
-		if value < min {
-			min = value
-		}
-		if value > max {
-			max = value
-		}
-		sum += value
-		count++
-	}
-	avg := sum / float64(count)
+func calcAverage(vals Measurements) Computed {
+	avg := vals.sum / float64(vals.count)
 	avg = math.Round((avg+0.00001)*10) / 10
 
-	return Measurements{
-		min: min,
-		max: max,
+	return Computed{
+		min: vals.min,
+		max: vals.max,
 		avg: avg,
 	}
 }
 
-func readFile(file string) map[string][]float64 {
+func readFile(file string) map[string]Measurements {
 	f, err := os.Open(file)
 	if err != nil {
 		log.Fatal(err)
@@ -180,73 +106,81 @@ func readFile(file string) map[string][]float64 {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
-	ch := make(chan Line)
+	results := make(map[string]Measurements)
+	ch := make(chan map[string]Measurements)
+	chunkSize := 50 // Number of lines to process at a time
+	var lines []string
 	var wg sync.WaitGroup
+	// var mutex sync.Mutex
 
 	go func() {
 		for scanner.Scan() {
-			wg.Add(1)
-			go processLine(scanner.Text(), &wg, ch)
+			lines = append(lines, scanner.Text())
+			if len(lines) == chunkSize {
+				wg.Add(1)
+				processChunk(lines, ch, &wg)
+				lines = nil
+			}
 		}
-		wg.Wait()
-		close(ch)
+		// wg.Wait()
+		// close(ch)
 	}()
 
-	data := map[string][]float64{}
+	wg.Wait()
+	close(ch)
 
-	for d := range ch {
-		data[d.key] = append(data[d.key], d.value)
-	}
+	// go func() {
+		for result := range ch {
+			for city, temps := range result {
+				// mutex.Lock()
+				if val, ok := results[city]; ok {
+					val.min = math.Min(val.min, temps.min)
+					val.max = math.Max(val.max, temps.max)
+					val.sum += temps.sum
+					val.count += temps.count
+					results[city] = val
+				} else {
+					results[city] = temps
+				}
+				// mutex.Unlock()
+			}
+		}
+	// }()
 
 	if err := scanner.Err(); err != nil {
 		log.Fatal(err)
 	}
 
-	return data
+	return results
 }
 
-type Line struct {
-	key string
-	value float64
-}
-
-func processLine(line string, wg *sync.WaitGroup, ch chan<- Line) {
+func processChunk(lines []string, ch chan<- map[string]Measurements, wg *sync.WaitGroup) {
 	defer wg.Done()
-	parts := strings.Split(line, ";")
-	// Convert value to float
-	value,err := strconv.ParseFloat(parts[1], 64)
-	if err != nil {
-		log.Fatal(err)
+	toSend := make(map[string]Measurements)
+	
+	for _, line := range lines {
+		parts := strings.Split(line, ";")
+		// Convert value to float
+		value,err := strconv.ParseFloat(parts[1], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if val, ok := toSend[parts[0]]; ok {
+			val.min = math.Min(val.min, value)
+			val.max = math.Max(val.max, value)
+			val.sum += value
+			val.count++
+			toSend[parts[0]] = val
+		} else {
+			toSend[parts[0]] = Measurements{
+				min: value,
+				max: value,
+				sum: value,
+				count: 1,
+			}
+		}
+
+		ch <- toSend
 	}
-
-	ch <- Line{
-		key: parts[0],
-		value: value,
-	}
-	// return parts[0], value
-
-	// min := data[parts[0]].min
-	// if value <= min || data[parts[0]].count == 0{
-	// 	min = value
-	// }
-
-	// max := data[parts[0]].max
-	// if value > max || data[parts[0]].count == 0{
-	// 	max = value
-	// }
-
-	// // Increment sum and count for this key
-	// data[parts[0]] = Measurements{
-	// 	sum: data[parts[0]].sum + value,
-	// 	count: data[parts[0]].count + 1,
-	// 	min: min,
-	// 	max: max,
-	// }
-
-	// return parts[0], Measurements{
-	// 	sum: value,
-	// 	count: 1,
-	// 	min: value,
-	// 	max: value,
-	// }
 }
