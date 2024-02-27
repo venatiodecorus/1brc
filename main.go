@@ -194,11 +194,9 @@ func readFile(file string) map[string][]float64 {
 
 	data := map[string][]float64{}
 
-	go func() {
-		for d := range ch {
-			data[d.key] = append(data[d.key], d.value)
-		}
-	}()
+	for d := range ch {
+		data[d.key] = append(data[d.key], d.value)
+	}
 
 	if err := scanner.Err(); err != nil {
 		log.Fatal(err)
